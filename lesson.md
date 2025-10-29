@@ -73,7 +73,6 @@ This also implies that parallelism is not guaranteed in Java. Java enables concu
 
 ### Life Cycle of a Thread
 
-<img src="https://static.javatpoint.com/core/images/life-cycle-of-a-thread.png" style="background-color:white;">
 
 | STATE         | REASON                                                                                                                   |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------ |
