@@ -12,27 +12,27 @@
 
 Q1: A thread is a unit of execution within a process?
 
-A - True
+A - True ✅
 
 B - False
 
 ---
 
-Q2: What is the difference between concurrency and parallelism?
+Q2: What is the main advantage of `ReentrantLock` over the `synchronized` keyword?
 
-A - Concurrency is executing tasks simultaneously, parallelism is interleaving tasks
+A - It is faster in all scenarios
 
-B - Concurrency is interleaving tasks, parallelism is executing tasks simultaneously
+B - It allows features like `tryLock()`, timeouts, and unlocking in a different method ✅
 
-C - They are the same thing
+C - It automatically handles deadlocks
 
-D - Concurrency only works on single-core systems
+D - It works without a try/finally block
 
 ---
 
 Q3: The Runnable interface is preferred over extending the Thread class for creating threads?
 
-A - True
+A - True ✅
 
 B - False
 
@@ -42,7 +42,7 @@ Q4: What keyword is used to prevent race conditions by ensuring only one thread 
 
 A - volatile
 
-B - synchronized
+B - synchronized ✅
 
 C - atomic
 
@@ -56,7 +56,7 @@ A - run()
 
 B - execute()
 
-C - start()
+C - start() ✅
 
 D - begin()
 
@@ -64,7 +64,7 @@ D - begin()
 
 Q6: ExecutorService manages a pool of threads and reuses them for better resource management?
 
-A - True
+A - True ✅
 
 B - False
 
@@ -74,7 +74,7 @@ Q7: What is the main advantage of CompletableFuture over Runnable?
 
 A - It runs faster
 
-B - It can return values and handle exceptions more easily
+B - It can return values and handle exceptions more easily ✅
 
 C - It uses less memory
 
@@ -86,7 +86,7 @@ Q8: Virtual threads in Java 21 are managed by which component?
 
 A - Operating System
 
-B - JVM (Java Virtual Machine)
+B - JVM (Java Virtual Machine) ✅
 
 C - CPU
 
@@ -98,7 +98,7 @@ Q9: Virtual threads are ideal for CPU-intensive calculations?
 
 A - True
 
-B - False
+B - False ✅
 
 ---
 
@@ -108,7 +108,7 @@ A - wait()
 
 B - sleep()
 
-C - join()
+C - join() ✅
 
 D - stop()
 

@@ -18,7 +18,7 @@ Create a program called MultithreadingAssignment.java and solve the following pr
    - Submit the deposit task twice and the withdraw task twice to the executor
    - Wait for all tasks to complete and print the final balance
    - Expected final balance: 1000 + (2 × 500) - (2 × 250) = 1500
-   - Demonstrate that without `synchronized`, the balance may be incorrect (comment out synchronized and show the issue)
+   - **Extension:** Re-implement the same `BankAccount` class using `ReentrantLock` instead of `synchronized`. Note the difference in approach and when you would prefer one over the other.
 
 2. **Asynchronous Task Processing with CompletableFuture**
    - Create three methods that simulate time-consuming operations:
