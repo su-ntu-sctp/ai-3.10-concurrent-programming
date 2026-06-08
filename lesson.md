@@ -68,6 +68,10 @@ new Thread(() -> System.out.println("Hello from thread")).start();
 
 A thread can pause its own execution by calling `Thread.sleep(milliseconds)`. This is useful for polling, rate-limiting, or simulating delays in tests. Sleep throws `InterruptedException` — a checked exception you must handle — which fires if another thread calls `interrupt()` on the sleeping thread.
 
+> **Note:** The following code goes inside the `main` method of `LearnThreads.java`.
+
+> **Tip:** To insert an emoji on Windows press **Windows key + .** (period) to open the emoji picker.
+
 ```java
 Thread t = new Thread(() -> {
     try {
@@ -89,7 +93,7 @@ t.interrupt(); // Wake it up early
 
 A **race condition** occurs when two or more threads read and write the same shared data concurrently and the final result depends on the unpredictable order in which the threads are scheduled. The name is apt: the threads are literally racing to update the same variable, and whoever gets there last wins — which may not be what you intended.
 
-Create a `MultipleThreads.java` and code along.
+Create a `RaceDemo.java` and code along.
 
 Add a `BankAccount` class:
 
@@ -161,12 +165,22 @@ Run the code again. The balance is now consistent every time. This is the simple
 
 `synchronized` is simple but inflexible. `ReentrantLock` from `java.util.concurrent.locks` gives you more control: you can attempt to acquire a lock without blocking forever (`tryLock()`), set a timeout, or lock and unlock in different methods. The lock/unlock pattern is always placed inside a `try/finally` block to guarantee the lock is released even if an exception is thrown.
 
+Add the `BankAccountV2` class to `RaceDemo.java` and run the same four threads against it in `main` to verify the balance is consistent.
+
 ```java
 import java.util.concurrent.locks.ReentrantLock;
 
 class BankAccountV2 {
     private double balance;
     private final ReentrantLock lock = new ReentrantLock();
+
+    public BankAccountV2(double balance) {
+        this.balance = balance;
+    }
+
+    public double getBalance() {
+        return balance;
+    }
 
     public void deposit(double amount) {
         lock.lock();
@@ -190,9 +204,25 @@ class BankAccountV2 {
 }
 ```
 
+In `main`, run the same four threads as before but using `BankAccountV2`:
+
+```java
+BankAccountV2 account2 = new BankAccountV2(1000);
+
+Runnable depositTask2  = () -> { for (int i = 0; i < 5; i++) account2.deposit(100); };
+Runnable withdrawTask2 = () -> { for (int i = 0; i < 5; i++) account2.withdraw(200); };
+
+new Thread(depositTask2).start();
+new Thread(depositTask2).start();
+new Thread(withdrawTask2).start();
+new Thread(withdrawTask2).start();
+```
+
 #### `ConcurrentHashMap` — concurrent collections
 
 Locking individual methods works for custom classes, but when you need a shared map across threads, reach for the concurrent collections in `java.util.concurrent`. The most commonly used is `ConcurrentHashMap` — a thread-safe drop-in replacement for `HashMap`. It achieves thread safety without locking the entire map: it partitions the map into segments and only locks the relevant segment during a write, making it far more performant than wrapping a `HashMap` in `synchronized`.
+
+Add the following to `main` in `RaceDemo.java`:
 
 ```java
 import java.util.concurrent.ConcurrentHashMap;
@@ -200,10 +230,14 @@ import java.util.concurrent.ConcurrentHashMap;
 ConcurrentHashMap<String, Integer> wordCount = new ConcurrentHashMap<>();
 
 // Thread-safe increment — no manual locking needed
+// Call merge twice on "hello" to demonstrate the increment
+wordCount.merge("hello", 1, Integer::sum);
 wordCount.merge("hello", 1, Integer::sum);
 
-// Also useful: computeIfAbsent, putIfAbsent
+// Only inserts if the key is not already present
 wordCount.computeIfAbsent("world", k -> 0);
+
+System.out.println(wordCount); // {hello=2, world=0}
 ```
 
 **Quick reference — which tool to use?**
@@ -248,40 +282,45 @@ The solution is a **thread pool** — a fixed set of pre-created threads that st
 
 `ExecutorService` is the main interface for working with thread pools in Java. The `Executors` factory class provides several ready-made pool configurations.
 
-Create a `LearnExecutors.java` and code along.
+Create a `LearnExecutors.java` and code along. All the following code goes inside `main`.
 
 ```java
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-// Fixed pool of 5 threads — at most 5 tasks run simultaneously
-// Extra tasks queue up and wait for a thread to become free
-ExecutorService executorService = Executors.newFixedThreadPool(5);
+public class LearnExecutors {
+    public static void main(String[] args) {
 
-Runnable printLettersRunnable = () -> {
-    System.out.println(Thread.currentThread().getName() + ": Looping through letters A to E");
-    String[] letters = { "A", "B", "C", "D", "E" };
-    for (String letter : letters) {
-        System.out.println(Thread.currentThread().getName() + ": " + letter);
-        try { Thread.sleep(1000); } catch (InterruptedException e) { }
+        // Fixed pool of 5 threads — at most 5 tasks run simultaneously
+        // Extra tasks queue up and wait for a thread to become free
+        ExecutorService executorService = Executors.newFixedThreadPool(5);
+
+        Runnable printLettersRunnable = () -> {
+            System.out.println(Thread.currentThread().getName() + ": Looping through letters A to E");
+            String[] letters = { "A", "B", "C", "D", "E" };
+            for (String letter : letters) {
+                System.out.println(Thread.currentThread().getName() + ": " + letter);
+                try { Thread.sleep(1000); } catch (InterruptedException e) { }
+            }
+        };
+
+        Runnable printSquaresRunnable = () -> {
+            System.out.println(Thread.currentThread().getName() + ": Printing squares of 1 to 5");
+            for (int i = 1; i <= 5; i++) {
+                System.out.println(Thread.currentThread().getName() + ": " + i + "^2 = " + (i * i));
+                try { Thread.sleep(1000); } catch (InterruptedException e) { }
+            }
+        };
+
+        // Submit tasks — ExecutorService calls start() for you
+        executorService.execute(printLettersRunnable);
+        executorService.execute(printSquaresRunnable);
+        executorService.execute(printLettersRunnable);
+
+        // Always shut down — without this the thread pool keeps the JVM alive
+        executorService.shutdown();
     }
-};
-
-Runnable printSquaresRunnable = () -> {
-    System.out.println(Thread.currentThread().getName() + ": Printing squares of 1 to 5");
-    for (int i = 1; i <= 5; i++) {
-        System.out.println(Thread.currentThread().getName() + ": " + i + "^2 = " + (i * i));
-        try { Thread.sleep(1000); } catch (InterruptedException e) { }
-    }
-};
-
-// Submit tasks — ExecutorService calls start() for you
-executorService.execute(printLettersRunnable);
-executorService.execute(printSquaresRunnable);
-executorService.execute(printLettersRunnable);
-
-// Always shut down — without this the thread pool keeps the JVM alive
-executorService.shutdown();
+}
 ```
 
 Now try changing the pool size to 2 and observe how the output changes.
@@ -360,18 +399,33 @@ future1.join();
 
 Use `CompletableFuture.supplyAsync()` when your task returns a result. It takes a `Supplier` (a functional interface that returns a value).
 
-```java
-CompletableFuture<Long> future2 = CompletableFuture.supplyAsync(() -> {
-    return calculateBigNumber2();
-});
+**Default thread pool — ForkJoinPool:** When you do not specify a thread pool, `supplyAsync()` (and `runAsync()`) automatically uses `ForkJoinPool.commonPool()` — a shared pool the JVM creates at startup, sized to `number of CPU cores - 1`. You never need to create or manage it. You will see it in stack traces labelled as `ForkJoinPool.commonPool-worker-N`.
 
-// thenAccept() consumes the result when ready — returns void, ends the chain
-future2.thenAccept(result -> {
+If you want to use your own pool instead — for example to isolate database calls from HTTP calls — pass an `ExecutorService` as the second argument:
+
+```java
+ExecutorService myPool = Executors.newFixedThreadPool(4);
+
+CompletableFuture<Long> future = CompletableFuture.supplyAsync(() -> {
+    return calculateBigNumber2();
+}, myPool); // uses your pool, not ForkJoinPool
+
+myPool.shutdown();
+```
+
+For most use cases the default `ForkJoinPool` is fine. Now back to the standard pattern — chain `thenAccept()` directly onto `supplyAsync()` and call `join()` on the entire chain, not just the `supplyAsync()` stage. Otherwise `thenAccept()` may not have executed by the time `join()` returns.
+
+```java
+CompletableFuture<Void> future2 = CompletableFuture.supplyAsync(() -> {
+    return calculateBigNumber2(); // returns Long
+}).thenAccept(result -> {
     System.out.println(Thread.currentThread().getName() + ": Result = " + result);
 });
 
-future2.join();
+future2.join(); // waits for the entire chain including thenAccept()
 ```
+
+> **Important:** Always call `join()` on the **last stage** of the chain, not the first. Calling `join()` on `supplyAsync()` alone only waits for the computation — `thenAccept()` is a separate stage that nobody is waiting for, so it may never print.
 
 ---
 
@@ -379,8 +433,14 @@ future2.join();
 
 While `thenAccept()` consumes a result (returning void), `thenApply()` **transforms** a result and returns a new `CompletableFuture` with the transformed value. This is the method you will use most often when chaining async operations — each step takes the output of the previous step and produces new output.
 
+**Chain order:** Always use `thenApply()` for intermediate transformation steps and `thenAccept()` as the final step to consume the result. `thenAccept()` returns `CompletableFuture<Void>` — nothing meaningful can be chained after it.
+
+```
+supplyAsync() → thenApply() → thenApply() → thenAccept()
+```
+
 ```java
-CompletableFuture<String> future3 = CompletableFuture.supplyAsync(() -> {
+CompletableFuture<Void> future3 = CompletableFuture.supplyAsync(() -> {
     return calculateBigNumber2(); // returns Long
 })
 .thenApply(result -> {
@@ -388,16 +448,29 @@ CompletableFuture<String> future3 = CompletableFuture.supplyAsync(() -> {
 })
 .thenApply(formatted -> {
     return formatted.toUpperCase(); // String -> String
+})
+.thenAccept(finalResult -> {
+    System.out.println(Thread.currentThread().getName() + ": " + finalResult); // consume and print
 });
 
-System.out.println(future3.join()); // blocks and prints the final String
+future3.join();
 ```
 
-| Method | Use when |
-|---|---|
-| `thenApply(fn)` | You want to transform the result and pass it to the next stage |
-| `thenAccept(fn)` | You want to consume the result — no further chaining needed |
-| `thenRun(fn)` | You want to run a follow-up action that ignores the result |
+If you want to retrieve the final value rather than just print it, end with `thenApply()` instead of `thenAccept()` and call `join()` to extract it:
+
+```java
+String result = CompletableFuture.supplyAsync(() -> calculateBigNumber2())
+    .thenApply(r -> "Result: " + r)
+    .join(); // extracts the final String value
+
+System.out.println(result);
+```
+
+| Method | Returns | Use when |
+|---|---|---|
+| `thenApply(fn)` | `CompletableFuture<T>` | Transform the result — chain continues |
+| `thenAccept(fn)` | `CompletableFuture<Void>` | Consume the result — last step, no further chaining |
+| `thenRun(fn)` | `CompletableFuture<Void>` | Run a follow-up action that ignores the result |
 
 ---
 
