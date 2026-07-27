@@ -220,25 +220,30 @@ new Thread(withdrawTask2).start();
 
 #### `ConcurrentHashMap` — concurrent collections
 
-Locking individual methods works for custom classes, but when you need a shared map across threads, reach for the concurrent collections in `java.util.concurrent`. The most commonly used is `ConcurrentHashMap` — a thread-safe drop-in replacement for `HashMap`. It achieves thread safety without locking the entire map: it partitions the map into segments and only locks the relevant segment during a write, making it far more performant than wrapping a `HashMap` in `synchronized`.
+A normal `HashMap` is **not safe** when several threads write to it at the same time — you get race conditions, just like the bank account. You could wrap a `HashMap` in `synchronized`, but that locks the **whole map**, so only one thread can touch it at a time — slow.
+
+`ConcurrentHashMap` is a **thread-safe HashMap**. Its trick is that it does **not** lock the whole map on a write — it only locks the small part you are touching. So many threads can safely write to different parts at the same time. It is safe *and* fast, and it is a drop-in replacement for `HashMap`.
 
 Add the following to `main` in `RaceDemo.java`:
 
 ```java
 import java.util.concurrent.ConcurrentHashMap;
 
-ConcurrentHashMap<String, Integer> wordCount = new ConcurrentHashMap<>();
+// Thread-safe map — many threads can put/get at the same time safely
+ConcurrentHashMap<String, Integer> scores = new ConcurrentHashMap<>();
 
-// Thread-safe increment — no manual locking needed
-// Call merge twice on "hello" to demonstrate the increment
-wordCount.merge("hello", 1, Integer::sum);
-wordCount.merge("hello", 1, Integer::sum);
+scores.put("Alice", 10);
+scores.put("Bob", 20);
 
-// Only inserts if the key is not already present
-wordCount.computeIfAbsent("world", k -> 0);
+// Reading and updating works just like a normal HashMap
+System.out.println("Alice's score: " + scores.get("Alice"));
 
-System.out.println(wordCount); // {hello=2, world=0}
+scores.put("Alice", 15); // update Alice's score
+
+System.out.println(scores); // {Alice=15, Bob=20}
 ```
+
+You use it exactly like a normal `HashMap` (`put`, `get`, and so on) — the only difference is that it is safe when many threads use it at once.
 
 **Quick reference — which tool to use?**
 
@@ -252,21 +257,12 @@ System.out.println(wordCount); // {hello=2, world=0}
 
 ### 🧑‍💻 Activity **(10 minutes)**
 
-Add a `calculateBigNumber()` method to `LearnThreads.java`:
+You will build a shared counter that several threads increment at the same time, and see why synchronization matters.
 
-```java
-public static long calculateBigNumber() {
-    long result = 0;
-    for (long i = 0; i < 1_000_000_000; i++) {
-        result += i;
-    }
-    return result;
-}
-```
-
-1. Run this method in two threads concurrently using lambda expressions.
-2. Add a shared `ConcurrentHashMap<String, Long>` that stores each thread's result keyed by thread name.
-3. Print the map after both threads complete.
+1. Create a `Counter` class with a private `int count` field and an `increment()` method that does `count++`. Add a `getCount()` method.
+2. In `main`, create one shared `Counter`. Start **two threads**, each running a lambda that calls `increment()` 1000 times in a loop.
+3. Use `join()` to wait for both threads to finish, then print the final count. Run it a few times — you will often see a value **less than 2000** because `count++` is not atomic (a race condition).
+4. Now fix it: make `increment()` a `synchronized` method (or protect `count++` with a `ReentrantLock`). Run again — the result should be exactly **2000** every time.
 
 ---
 
@@ -494,7 +490,9 @@ future4.join();
 
 ---
 
-### `allOf()` — Waiting for Multiple Futures
+### `allOf()` — Waiting for Multiple Futures *(Optional)*
+
+> **Optional / exposure only:** This section is here so you recognise `allOf()` when you see it. It is not core to the lesson — feel free to skim it and come back later.
 
 `CompletableFuture.allOf()` takes multiple futures and returns a new future that completes when all of them complete. A common pattern is to collect the results after all futures are done:
 
@@ -515,10 +513,16 @@ System.out.println("Combined total: " + total);
 
 ### 🧑‍💻 Activity **(10 minutes)**
 
-1. Write three `supplyAsync()` tasks, each returning a `Long` result.
-2. Chain a `thenApply()` on each to format the result as a `String`.
-3. Use `allOf()` to wait for all three, then collect and print each result.
-4. Add an `exceptionally()` handler to one of the tasks by intentionally throwing an exception inside the supplier.
+Build a single `CompletableFuture` pipeline that takes a price, adds tax, formats it, and prints it — with error handling at the end.
+
+1. Start with `CompletableFuture.supplyAsync()` that returns a `Long` price — use `1000L`.
+2. Chain a `thenApply()` that adds 10% tax: `price -> price + (price / 10)` (gives `1100`).
+3. Chain a second `thenApply()` that formats the result as a `String`: `withTax -> "Final price: " + withTax`.
+4. Chain a `thenAccept()` that prints the final string.
+5. Chain an `exceptionally()` at the end that catches any error and prints a message.
+6. Call `.join()` on the whole chain so the program waits for it to finish.
+
+To see `exceptionally()` actually fire, test the error path by throwing an exception inside the supplier (e.g. `throw new RuntimeException("Price service down");`) instead of returning `1000L`.
 
 ---
 
@@ -552,23 +556,28 @@ The key insight is this: most threads in a typical web application spend the vas
 
 Create a `LearnVirtualThreads.java` and code along.
 
+> **Note on `join()`:** `join()` throws the checked exception `InterruptedException`, so any method that calls `join()` must either declare `throws InterruptedException` or wrap the call in a try/catch. This is a `join()` rule, not a virtual-thread rule — it applies to platform threads too. The examples below declare `throws InterruptedException` on `main`. (Note: `start()` and `interrupt()` do not throw it; `Thread.sleep()` does, but it is already wrapped in try/catch inside the lambdas.)
+
 #### Method 1: `Thread.startVirtualThread()`
 
 The simplest way — creates and starts a virtual thread in one call.
 
 ```java
-Thread virtualThread = Thread.startVirtualThread(() -> {
-    System.out.println("Running in: " + Thread.currentThread());
-    try {
-        Thread.sleep(1000);
-        System.out.println("Virtual thread woke up!");
-    } catch (InterruptedException e) {
-        e.printStackTrace();
-    }
-});
+public static void main(String[] args) throws InterruptedException {
 
-virtualThread.join();
-System.out.println("Main thread finished");
+    Thread virtualThread = Thread.startVirtualThread(() -> {
+        System.out.println("Running in: " + Thread.currentThread());
+        try {
+            Thread.sleep(1000);
+            System.out.println("Virtual thread woke up!");
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    });
+
+    virtualThread.join(); // needs throws InterruptedException on main (above)
+    System.out.println("Main thread finished");
+}
 ```
 
 Notice the thread name includes `VirtualThread` in the output — this confirms it is a virtual thread, not a platform thread.
@@ -578,19 +587,22 @@ Notice the thread name includes `VirtualThread` in the output — this confirms 
 For more control, such as setting a custom thread name.
 
 ```java
-Thread virtualThread2 = Thread.ofVirtual()
-    .name("my-virtual-thread")
-    .start(() -> {
-        System.out.println("Running in: " + Thread.currentThread().getName());
-        try {
-            Thread.sleep(500);
-            System.out.println("Task completed!");
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    });
+public static void main(String[] args) throws InterruptedException {
 
-virtualThread2.join();
+    Thread virtualThread2 = Thread.ofVirtual()
+        .name("my-virtual-thread")
+        .start(() -> {
+            System.out.println("Running in: " + Thread.currentThread().getName());
+            try {
+                Thread.sleep(500);
+                System.out.println("Task completed!");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        });
+
+    virtualThread2.join(); // needs throws InterruptedException on main (above)
+}
 ```
 
 #### Method 3: Virtual Thread Executor (recommended for many tasks)
@@ -607,7 +619,7 @@ try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             System.out.println("Task " + taskNumber + " completed");
         });
     }
-} // try-with-resources auto-shuts down the executor
+} // try-with-resources auto-shuts down the executor AND waits for all tasks to finish
 ```
 
 ---
@@ -657,6 +669,20 @@ ExecutorService executorService = Executors.newFixedThreadPool(5);
 // After
 ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
 ```
+
+**Two changes you must make for this activity to work:**
+
+**1. Wrap the executor in try-with-resources.** With a virtual-thread executor and a plain `shutdown()`, **nothing prints**. This is because virtual threads do **not** keep the JVM alive (unlike platform threads) — so `main` reaches its end, the JVM exits, and the virtual threads die before they get a chance to run. Wrapping the executor in try-with-resources fixes this, because closing it at the end of the block automatically **waits** for all tasks to finish before `main` continues:
+
+```java
+try (ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor()) {
+    executorService.execute(printLettersRunnable);
+    executorService.execute(printSquaresRunnable);
+    executorService.execute(printLettersRunnable);
+} // closing brace waits for all tasks to finish, then shuts down
+```
+
+**2. Change `Thread.currentThread().getName()` to `Thread.currentThread()`** everywhere in this activity. The reason: virtual threads have **empty names by default**, so `getName()` prints a blank and you will miss the whole point of the exercise. Printing `Thread.currentThread()` directly shows the full label like `VirtualThread[#21]/runnable@...`, which is exactly what you want to see.
 
 ---
 
