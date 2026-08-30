@@ -25,16 +25,7 @@ A running application is called a **process**. Every process has at least one th
 
 When you create additional threads, the operating system scheduler decides when each one runs. You do not control the exact order — you can influence it, but never guarantee it. This is the fundamental reason concurrency is hard: **shared state + unpredictable scheduling = bugs that are difficult to reproduce.**
 
-### Thread Lifecycle
-
-A thread moves through a set of states during its lifetime. Understanding these helps you reason about what your threads are doing at any point.
-
-| State | Description |
-|---|---|
-| **New** | Thread created but `start()` not yet called |
-| **Runnable / Running** | After `start()` — ready to run or actively executing on a CPU core |
-| **Waiting / Sleeping** | Paused — waiting for a condition, a lock, or a timed sleep to expire |
-| **Terminated** | Execution has finished — the thread cannot be restarted |
+A thread is created, becomes ready to run, may pause while waiting for something, and finally terminates — and once terminated it cannot be restarted.
 
 ---
 
@@ -61,33 +52,6 @@ new Thread(() -> System.out.println("Hello from thread")).start();
 > **Important:** Always call `start()`, not `run()`. Calling `start()` is what actually creates a new OS thread and invokes `run()` on it. Calling `run()` directly just executes the method on the current thread — no new thread is created.
 
 > **Note:** You may see older code that creates threads by extending the `Thread` class and overriding `run()`. This approach is considered legacy — it ties your task to the threading mechanism, prevents you from extending another class, and cannot be reused across different execution strategies. Implement `Runnable` (or use a lambda) and keep your task separate from how it is executed.
-
----
-
-### Sleep and Interrupt
-
-A thread can pause its own execution by calling `Thread.sleep(milliseconds)` — useful for polling, rate-limiting, or simulating delays in tests. Sleep throws `InterruptedException`, a checked exception you must handle, which fires if another thread calls `interrupt()` on the sleeping thread.
-
-`interrupt()` is best thought of as **a knock on the door, not a command**. It does not force a thread to stop — it only sets a signal. If the thread happens to be sleeping or waiting, that signal becomes an `InterruptedException` and the thread jumps into its `catch` block. If the thread is busy running normal code, nothing visible happens unless the code checks for it. Java deliberately has **no way to force-kill a thread** — the old `Thread.stop()` was removed because it could kill a thread mid-write and corrupt shared data.
-
-> **Note:** Read through this example — you do not need to type it out.
-
-```java
-Thread t = new Thread(() -> {
-    try {
-        System.out.println("Going to sleep...");
-        Thread.sleep(5000);
-        System.out.println("Awake!");   // never runs — interrupted first
-    } catch (InterruptedException e) {
-        System.out.println("Thread was interrupted early.");
-    }
-});
-
-t.start();
-t.interrupt(); // Wake it up early
-```
-
-The thread never reaches `"Awake!"` — the interrupt cancels the sleep, and execution jumps straight to the `catch` block.
 
 ---
 
@@ -143,7 +107,7 @@ Run this several times. You will see the final balance is inconsistent. The prob
 
 ### Synchronization
 
-To fix a race condition, you need to ensure that only one thread at a time can execute the **critical section** — the code that reads and writes shared state. Java provides several mechanisms to do this.
+To fix a race condition, you need to ensure that only one thread at a time can execute the **critical section** — the code that reads and writes shared state.
 
 #### The `synchronized` keyword
 
@@ -163,27 +127,22 @@ public synchronized void withdraw(double amount) {
 
 Run the code again. The balance is now consistent every time. This is the simplest fix and works well for straightforward cases.
 
-#### `ReentrantLock` — when you need more control
+#### `ReentrantLock` — the manual alternative
 
-Both `synchronized` and `ReentrantLock` do the same job: let only one thread into the critical section at a time. The difference is **how the lock is turned on and off**:
+Both `synchronized` and `ReentrantLock` do the same job: let only one thread into the critical section at a time. The difference is **how the lock is turned on and off**. `synchronized` locks and unlocks **automatically**. `ReentrantLock` makes **you** do it manually — more code, but more control.
 
-- **`synchronized`** locks and unlocks **automatically**. One keyword, nothing to manage.
-- **`ReentrantLock`** makes **you** lock and unlock manually. More code, but more control.
+Why take on the extra work? Because being manual unlocks abilities `synchronized` cannot offer — most importantly `tryLock()`, which attempts to acquire the lock and **gives up** instead of waiting forever.
 
-Why would you take on the extra work? Because being manual unlocks abilities `synchronized` simply cannot offer — most importantly `tryLock()`, which attempts to acquire the lock and **gives up after a timeout** instead of waiting forever. That is how production code avoids deadlocks and fails gracefully.
-
-The lock/unlock pattern always goes inside `try/finally`, so the lock is released even if an exception is thrown. **Forget the `unlock()` and every other thread waits forever — a frozen application.**
-
-> **Note:** Read through this class and follow the pattern — you do not need to type it out.
+Comment out the two `synchronized` methods in `BankAccount` and add the lock versions underneath, so you can see both side by side. The `main` method stays exactly the same.
 
 ```java
 import java.util.concurrent.locks.ReentrantLock;
 
-class BankAccountV2 {
+class BankAccount {
     private double balance;
     private final ReentrantLock lock = new ReentrantLock();
 
-    public BankAccountV2(double balance) {
+    public BankAccount(double balance) {
         this.balance = balance;
     }
 
@@ -191,6 +150,18 @@ class BankAccountV2 {
         return balance;
     }
 
+    // ----- Version 1: synchronized (commented out) -----
+    // public synchronized void deposit(double amount) {
+    //     balance += amount;
+    //     System.out.println("🟢 Deposited: $" + amount + ", Current Balance: $" + balance);
+    // }
+
+    // public synchronized void withdraw(double amount) {
+    //     balance -= amount;
+    //     System.out.println("🔴 Withdrawn: $" + amount + ", Current Balance: $" + balance);
+    // }
+
+    // ----- Version 2: ReentrantLock -----
     public void deposit(double amount) {
         lock.lock();
         try {
@@ -212,6 +183,10 @@ class BankAccountV2 {
     }
 }
 ```
+
+The output is identical to the `synchronized` version — both fix the race condition the same way. What changes is flexibility, not behaviour.
+
+> **Why `finally` matters:** if an exception is thrown and `unlock()` never runs, the lock is held forever and every other thread waits forever — a frozen application. `synchronized` releases automatically, which is its main safety advantage.
 
 #### `ConcurrentHashMap` — concurrent collections
 
@@ -322,8 +297,6 @@ ExecutorService executorService = Executors.newFixedThreadPool(2);
 
 With only 2 threads, the third task cannot start immediately — it **queues** and waits until one of the first two finishes. Look at the thread names in the output: you will only ever see two of them working at a time, and one of them picks up the third task once it is free. The pool size caps how many tasks run at once; extra tasks are not lost, they simply wait their turn.
 
-> **Pool sizing:** A common starting point for I/O-bound work is `number of cores × 2`. For CPU-bound work, match the number of available cores (`Runtime.getRuntime().availableProcessors()`). In practice, pool sizing is workload-specific and benefits from load testing. If you are on Java 21, virtual threads (Part 4) often remove the need to think about pool sizing at all for I/O-bound tasks.
-
 ---
 
 ## Part 3: CompletableFuture
@@ -335,130 +308,82 @@ With only 2 threads, the third task cannot start immediately — it **queues** a
 - **No return value.** `Runnable.run()` returns void. If your async task produces a result, there is no built-in mechanism to get it back to the calling code.
 - **No exception propagation.** Exceptions thrown inside a thread's `run()` method are trapped there. The calling thread has no way to know something went wrong unless you build your own error-passing mechanism.
 
-`CompletableFuture`, introduced in Java 8, solves both problems. It represents the **eventual result** of an asynchronous computation — a value that does not exist yet but will at some point in the future. You can chain operations onto it, handle errors declarably, and compose multiple futures together.
+`CompletableFuture`, introduced in Java 8, solves both problems. It represents the **eventual result** of an asynchronous computation — a value that does not exist yet but will at some point in the future.
 
 **What "asynchronous" means:** normally your program waits at each slow line before moving on. Asynchronous means **start the work in the background and carry on** — two things happen at once. Later, when you actually need the result, you call `join()` to wait for it.
 
 Create a `LearnCompletableFuture.java` and add these helper methods:
 
 ```java
-// Method that does not return a value
-public static void calculateBigNumber1() {
-    long result = 0;
-    for (long i = 0; i < 1_000_000_000; i++) result += i;
-    System.out.println(Thread.currentThread().getName() + ": Result: " + result);
-}
-
 // Method that returns a value
-public static long calculateBigNumber2() {
+public static long calculateBigNumber() {
     long result = 0;
     for (long i = 0; i < 1_000_000_000; i++) result += i;
     return result;
 }
 
 // Method that throws an exception
-public static long calculateBigNumber3() {
+public static long calculateBigNumberError() {
     long result = 0;
     for (long i = 0; i < 1_000_000_000; i++) result += i;
-    throw new RuntimeException("Something went wrong in calculateBigNumber3");
+    throw new RuntimeException("Something went wrong");
 }
 ```
 
 ---
 
-### `runAsync()` — For Tasks That Do Not Return a Value
+### `supplyAsync()`, `thenApply()` and `thenAccept()`
 
-Use `CompletableFuture.runAsync()` when your task does not need to return anything. It takes a `Runnable` and runs it asynchronously. By default it runs on the **common ForkJoinPool** — a shared pool of worker threads the JVM creates at startup, sized to `number of CPU cores - 1`. You never need to create or manage it. You will see it in stack traces labelled as `ForkJoinPool.commonPool-worker-N`.
+`CompletableFuture.supplyAsync()` runs a task in the background and returns a result. By default it runs on the **common ForkJoinPool** — a shared pool of worker threads the JVM creates at startup. You never need to create or manage it.
 
-```java
-CompletableFuture<Void> future1 = CompletableFuture.runAsync(() -> {
-    calculateBigNumber1();
-});
+From there you chain steps onto the result:
 
-// join() blocks the current thread until future1 completes
-// Without this, main() may exit before the async task finishes
-future1.join();
-```
+- **`thenApply()`** takes the value, **transforms** it, and passes a new value along — the chain continues.
+- **`thenAccept()`** takes the value, **consumes** it (for example prints it), and returns nothing — the chain ends.
 
-> **Note:** The `Runnable` here is the **lambda** `() -> { ... }`. `calculateBigNumber1()` is just a normal method being called inside it.
-
----
-
-### `supplyAsync()` — For Tasks That Return a Value
-
-Use `CompletableFuture.supplyAsync()` when your task returns a result. It takes a `Supplier` (a functional interface that returns a value). Like `runAsync()`, it uses the common `ForkJoinPool` by default — that is fine for almost all use cases.
-
-Chain `thenAccept()` directly onto `supplyAsync()` and call `join()` on the entire chain, not just the `supplyAsync()` stage. Otherwise `thenAccept()` may not have executed by the time `join()` returns.
+Think of it as a factory line: `thenApply` is a station that changes the product and passes it on; `thenAccept` is the last station that packs it away.
 
 ```java
-CompletableFuture<Void> future2 = CompletableFuture.supplyAsync(() -> {
-    return calculateBigNumber2(); // returns Long
-}).thenAccept(result -> {
-    System.out.println(Thread.currentThread().getName() + ": Result = " + result);
-});
-
-future2.join(); // waits for the entire chain including thenAccept()
-```
-
-> **Important:** Always call `join()` on the **last stage** of the chain, not the first. Calling `join()` on `supplyAsync()` alone only waits for the computation — `thenAccept()` is a separate stage that nobody is waiting for, so it may never print.
-
-> **Why is this one `CompletableFuture<Void>` and not `<Long>`?** The type is decided by the **last step** in the chain. `supplyAsync()` produces a `Long`, but `thenAccept()` **consumes** that value and returns nothing — so the whole chain ends up as `<Void>`.
-
----
-
-### `thenApply()` — Transform the Result
-
-While `thenAccept()` consumes a result (returning void), `thenApply()` **transforms** a result and returns a new `CompletableFuture` with the transformed value. This is the method you will use most often when chaining async operations — each step takes the output of the previous step and produces new output.
-
-Think of it as a factory line: **`thenApply` is a station that changes the product and passes it on. `thenAccept` is the last station that packs it away — nothing leaves after it.**
-
-**Chain order:** Use `thenApply()` for intermediate transformation steps and `thenAccept()` as the final step to consume the result. `thenAccept()` returns `CompletableFuture<Void>` — nothing meaningful can be chained after it.
-
-```
-supplyAsync() → thenApply() → thenApply() → thenAccept()
-```
-
-```java
-CompletableFuture<Void> future3 = CompletableFuture.supplyAsync(() -> {
-    return calculateBigNumber2(); // returns Long
+CompletableFuture<Void> future = CompletableFuture.supplyAsync(() -> {
+    return calculateBigNumber();          // produces a Long
 })
 .thenApply(result -> {
-    return "Formatted result: " + result; // Long -> String
-})
-.thenApply(formatted -> {
-    return formatted.toUpperCase(); // String -> String
+    return "Result: " + result;           // transforms Long -> String
 })
 .thenAccept(finalResult -> {
-    System.out.println(Thread.currentThread().getName() + ": " + finalResult); // consume and print
+    System.out.println(finalResult);      // consumes and prints — chain ends
 });
 
-future3.join();
+future.join(); // waits for the entire chain to finish
 ```
+
+> **Important:** Always call `join()` on the **last stage** of the chain, not the first. Calling `join()` on `supplyAsync()` alone only waits for the computation — the later stages are separate and may never run.
+
+> **Why is this `CompletableFuture<Void>` and not `<Long>`?** The type is decided by the **last step**. `supplyAsync()` produces a `Long`, but `thenAccept()` consumes that value and returns nothing — so the whole chain ends up as `<Void>`.
 
 | Method | Returns | Use when |
 |---|---|---|
 | `thenApply(fn)` | `CompletableFuture<T>` | Transform the result — chain continues |
 | `thenAccept(fn)` | `CompletableFuture<Void>` | Consume the result — last step, no further chaining |
-| `thenRun(fn)` | `CompletableFuture<Void>` | Run a follow-up action that ignores the result |
 
 ---
 
 ### `exceptionally()` — Handling Errors
 
-When an exception is thrown inside any stage of a `CompletableFuture` chain, the exception propagates down and **skips** all `thenApply` and `thenAccept` stages until it reaches an `exceptionally()` handler. This gives you a clean, centralised place to handle errors without wrapping every stage in try/catch.
+When an exception is thrown inside any stage of a chain, it propagates down and **skips** all the `thenApply` and `thenAccept` stages until it reaches an `exceptionally()` handler. This gives you one central place to handle errors instead of wrapping every stage in try/catch.
 
 ```java
-CompletableFuture<Void> future4 = CompletableFuture.supplyAsync(() -> {
-    return calculateBigNumber3(); // throws RuntimeException
+CompletableFuture<Void> future2 = CompletableFuture.supplyAsync(() -> {
+    return calculateBigNumberError();           // throws RuntimeException
 })
-.thenApply(result -> "Result: " + result)   // skipped due to exception
-.thenAccept(System.out::println)            // skipped due to exception
+.thenApply(result -> "Result: " + result)       // skipped due to exception
+.thenAccept(System.out::println)                // skipped due to exception
 .exceptionally(ex -> {
     System.out.println("Caught: " + ex.getMessage());
     return null;
 });
 
-future4.join();
+future2.join();
 ```
 
 ---
@@ -474,7 +399,7 @@ Build a single `CompletableFuture` pipeline that takes a price, adds tax, format
 5. Chain an `exceptionally()` at the end that catches any error and prints a message.
 6. Call `.join()` on the whole chain so the program waits for it to finish.
 
-To see `exceptionally()` actually fire, test the error path by throwing an exception inside the supplier (e.g. `throw new RuntimeException("Price service down");`) instead of returning `1000L`.
+To see `exceptionally()` actually fire, test the error path by throwing an exception inside the supplier instead of returning `1000L`.
 
 ---
 
@@ -510,8 +435,6 @@ Here is the crucial difference. A **platform thread keeps its OS thread even whi
 
 Create a `LearnVirtualThreads.java` and code along.
 
-> **Note on `join()`:** `join()` throws the checked exception `InterruptedException`, so any method that calls `join()` must either declare `throws InterruptedException` or wrap the call in a try/catch. This is a `join()` rule, not a virtual-thread rule — it applies to platform threads too. (`start()` and `interrupt()` do not throw it; `Thread.sleep()` does, but it is already wrapped in try/catch inside the lambdas below.)
-
 #### Method 1: `Thread.startVirtualThread()`
 
 The simplest way — creates and starts a virtual thread in one call.
@@ -529,18 +452,20 @@ public static void main(String[] args) throws InterruptedException {
         }
     });
 
-    virtualThread.join(); // needs throws InterruptedException on main (above)
+    virtualThread.join();
     System.out.println("Main thread finished");
 }
 ```
 
 Notice the output includes `VirtualThread` — this confirms it is a virtual thread, not a platform thread.
 
+> **Note:** `join()` throws the checked exception `InterruptedException`, so `main` declares `throws InterruptedException`. This is a `join()` rule, not a virtual-thread rule — it applies to platform threads too.
+
 > **Also available:** `Thread.ofVirtual().name("my-thread").start(...)` if you need to give a virtual thread a custom name — virtual threads have no name by default.
 
 #### Method 2: Virtual Thread Executor (recommended for many tasks)
 
-For running many tasks concurrently, use `Executors.newVirtualThreadPerTaskExecutor()`. Unlike `newFixedThreadPool`, there is no pool size limit — the executor creates a **new virtual thread for every task you submit** and manages everything automatically. This is where the threads actually get created: `submit()` makes one, runs your task on it, and cleans up afterwards.
+For running many tasks concurrently, use `Executors.newVirtualThreadPerTaskExecutor()`. Unlike `newFixedThreadPool`, there is no pool size limit — the executor creates a **new virtual thread for every task you submit** and manages everything automatically.
 
 ```java
 try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -555,28 +480,11 @@ try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
 } // try-with-resources auto-shuts down the executor AND waits for all tasks to finish
 ```
 
----
+All 10 tasks run at the same time, so the whole thing finishes in about a second rather than ten.
 
-### Seeing the Scalability Advantage
+> **The `try (...)` is essential.** Virtual threads do **not** keep the JVM alive. With a plain `shutdown()`, `main` reaches its end, the JVM exits, and the tasks die before printing anything — you get no output at all. Closing the executor at the end of the try block automatically **waits** for all tasks to finish first.
 
-Try creating 10,000 virtual threads — something that would exhaust memory or degrade severely with platform threads:
-
-```java
-long startTime = System.currentTimeMillis();
-
-try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-    for (int i = 0; i < 10_000; i++) {
-        executor.submit(() -> {
-            try { Thread.sleep(100); } catch (InterruptedException e) { e.printStackTrace(); }
-        });
-    }
-}
-
-long elapsed = System.currentTimeMillis() - startTime;
-System.out.println("10,000 virtual threads completed in " + elapsed + "ms");
-```
-
-All 10,000 wait at the same time and the whole thing finishes in a fraction of a second, because waiting virtual threads release their OS threads. The same test with 10,000 platform threads would need roughly 10GB of memory and would crash or crawl.
+> **Print `Thread.currentThread()`, not `.getName()`.** Virtual threads have empty names by default, so `getName()` prints a blank. Printing the thread object shows the full `VirtualThread[#21]/...` label.
 
 ---
 
@@ -594,28 +502,6 @@ spring.threads.virtual.enabled=true
 Spring Boot replaces the default Tomcat thread pool with virtual threads, meaning each incoming request gets its own virtual thread. No code changes, no reactive rewrites — the same blocking-style code you already write now scales to handle far more concurrent requests.
 
 `ExecutorService` and `CompletableFuture` are different: those you **do** write yourself, when a single request needs several slow operations done in parallel (for example calling three external services at once instead of one after another).
-
----
-
-### 🧑‍💻 Activity **(5 minutes)**
-
-Go back to your `LearnExecutors.java` from Part 2. Replace `Executors.newFixedThreadPool(5)` with `Executors.newVirtualThreadPerTaskExecutor()` and observe the difference in thread names in the output.
-
-**Two changes you must make for this activity to work:**
-
-**1. Wrap the executor in try-with-resources.** With a virtual-thread executor and a plain `shutdown()`, **nothing prints**. This is because virtual threads do **not** keep the JVM alive (unlike platform threads) — so `main` reaches its end, the JVM exits, and the virtual threads die before they get a chance to run. Wrapping the executor in try-with-resources fixes this, because closing it at the end of the block automatically **waits** for all tasks to finish before `main` continues:
-
-```java
-try (ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor()) {
-    executorService.execute(printLettersRunnable);
-    executorService.execute(printSquaresRunnable);
-    executorService.execute(printLettersRunnable);
-} // closing brace waits for all tasks to finish, then shuts down
-```
-
-**2. Change `Thread.currentThread().getName()` to `Thread.currentThread()`** everywhere in this activity. The reason: virtual threads have **empty names by default**, so `getName()` prints a blank and you will miss the whole point of the exercise. Printing `Thread.currentThread()` directly shows the full label like `VirtualThread[#21]/runnable@...`, which is exactly what you want to see.
-
-Compare the names to Part 2: platform threads showed `pool-1-thread-N`; virtual threads show `VirtualThread[#N]`.
 
 ---
 
