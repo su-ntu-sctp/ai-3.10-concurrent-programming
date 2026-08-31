@@ -221,6 +221,13 @@ You use it exactly like a normal `HashMap` (`put`, `get`, and so on) — the onl
 
 ---
 
+### Other Concurrent Collections
+
+`ConcurrentHashMap` is the one you will use most, but every common collection has a thread-safe version in the same `java.util.concurrent` package. `CopyOnWriteArrayList` is a thread-safe list, best when you read often and write rarely. `CopyOnWriteArraySet` and `ConcurrentHashMap.newKeySet()` are thread-safe sets. `ConcurrentLinkedQueue` and `LinkedBlockingQueue` are thread-safe queues — a blocking queue is what sits inside every `ExecutorService`, holding tasks that are waiting for a free thread. `ConcurrentSkipListMap` is the thread-safe version of `TreeMap` when you need keys kept in sorted order. You do not need to memorise these; the rule is what matters — if a collection is shared across threads, use the concurrent version instead of the plain one.
+
+> **Important:** Making a collection thread-safe protects the collection itself — adding, removing, reading. It does not protect the objects inside it. If two threads take the same `Customer` out of a thread-safe list and both change its balance, that is still a race condition.
+---
+
 ### 🧑‍💻 Activity **(10 minutes)**
 
 You will build a shared counter that several threads increment at the same time, and see why synchronization matters.
