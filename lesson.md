@@ -129,9 +129,7 @@ Run the code again. The balance is now consistent every time. This is the simple
 
 #### `ReentrantLock` — the manual alternative
 
-Both `synchronized` and `ReentrantLock` do the same job: let only one thread into the critical section at a time. The difference is **how the lock is turned on and off**. `synchronized` locks and unlocks **automatically**. `ReentrantLock` makes **you** do it manually — more code, but more control.
-
-Why take on the extra work? Because being manual unlocks abilities `synchronized` cannot offer — most importantly `tryLock()`, which attempts to acquire the lock and **gives up** instead of waiting forever.
+Both `synchronized` and `ReentrantLock` do the same job: let only one thread into the critical section at a time. The difference is **how the lock is turned on and off**. `synchronized` locks and unlocks **automatically** — it always locks the whole method, and that is your only option. `ReentrantLock` makes **you** do it manually, so you decide exactly where the lock starts and exactly where it ends. You could lock just a few lines in the middle of a long method, or lock in one method and unlock in another.
 
 Comment out the two `synchronized` methods in `BankAccount` and add the lock versions underneath, so you can see both side by side. The `main` method stays exactly the same.
 
@@ -184,7 +182,7 @@ class BankAccount {
 }
 ```
 
-The output is identical to the `synchronized` version — both fix the race condition the same way. What changes is flexibility, not behaviour.
+The output is identical to the `synchronized` version — both fix the race condition the same way. What changes is control over the lock, not behaviour.
 
 > **Why `finally` matters:** if an exception is thrown and `unlock()` never runs, the lock is held forever and every other thread waits forever — a frozen application. `synchronized` releases automatically, which is its main safety advantage.
 
@@ -217,8 +215,8 @@ You use it exactly like a normal `HashMap` (`put`, `get`, and so on) — the onl
 
 | Tool | Use when |
 |---|---|
-| `synchronized` | Simple cases, fine-grained locking on a single object |
-| `ReentrantLock` | Need `tryLock()`, timeouts, or unlock in a different method |
+| `synchronized` | Simple cases — automatic locking on a single object |
+| `ReentrantLock` | You need to control exactly where the lock starts and ends |
 | `ConcurrentHashMap` | Shared map across threads — always prefer over synchronizing a `HashMap` |
 
 ---
@@ -228,9 +226,9 @@ You use it exactly like a normal `HashMap` (`put`, `get`, and so on) — the onl
 You will build a shared counter that several threads increment at the same time, and see why synchronization matters.
 
 1. Create a `Counter` class with a private `int count` field and an `increment()` method that does `count++`. Add a `getCount()` method.
-2. In `main`, create one shared `Counter`. Start **two threads**, each running a lambda that calls `increment()` 1000 times in a loop.
-3. Use `join()` to wait for both threads to finish, then print the final count. Run it a few times — you will often see a value **less than 2000** because `count++` is not atomic (a race condition).
-4. Now fix it: make `increment()` a `synchronized` method (or protect `count++` with a `ReentrantLock`). Run again — the result should be exactly **2000** every time.
+2. In `main`, create one shared `Counter`. Start **two threads**, each running a lambda that calls `increment()` 10,000 times in a loop.
+3. Use `join()` to wait for both threads to finish, then print the final count. Run it a few times — you will see a value **less than 20,000** (often around 17,000–18,000) because `count++` is not atomic (a race condition). Notice the number is different on every run.
+4. Now fix it: make `increment()` a `synchronized` method (or protect `count++` with a `ReentrantLock`). Run again — the result should be exactly **20,000** every time, with no variation at all.
 
 > **Note:** `join()` throws the checked exception `InterruptedException`, so your `main` method needs `throws InterruptedException` (or wrap the `join()` calls in a try/catch).
 
@@ -332,7 +330,7 @@ public static long calculateBigNumberError() {
 
 ---
 
-### `supplyAsync()`, `thenApply()` and `thenAccept()`
+### `supplyAsync()`, `thenApply()`, `thenAccept()` and `exceptionally()`
 
 `CompletableFuture.supplyAsync()` runs a task in the background and returns a result. By default it runs on the **common ForkJoinPool** — a shared pool of worker threads the JVM creates at startup. You never need to create or manage it.
 
@@ -340,6 +338,7 @@ From there you chain steps onto the result:
 
 - **`thenApply()`** takes the value, **transforms** it, and passes a new value along — the chain continues.
 - **`thenAccept()`** takes the value, **consumes** it (for example prints it), and returns nothing — the chain ends.
+- **`exceptionally()`** catches any error thrown anywhere in the chain.
 
 Think of it as a factory line: `thenApply` is a station that changes the product and passes it on; `thenAccept` is the last station that packs it away.
 
@@ -352,6 +351,10 @@ CompletableFuture<Void> future = CompletableFuture.supplyAsync(() -> {
 })
 .thenAccept(finalResult -> {
     System.out.println(finalResult);      // consumes and prints — chain ends
+})
+.exceptionally(ex -> {
+    System.out.println("Caught: " + ex.getMessage());
+    return null;
 });
 
 future.join(); // waits for the entire chain to finish
@@ -361,45 +364,26 @@ future.join(); // waits for the entire chain to finish
 
 > **Why is this `CompletableFuture<Void>` and not `<Long>`?** The type is decided by the **last step**. `supplyAsync()` produces a `Long`, but `thenAccept()` consumes that value and returns nothing — so the whole chain ends up as `<Void>`.
 
+> **Why `return null` in `exceptionally()`?** It must return a value of the same type as the chain. Here the chain is `<Void>`, so `null` is the only thing it can return.
+
 | Method | Returns | Use when |
 |---|---|---|
 | `thenApply(fn)` | `CompletableFuture<T>` | Transform the result — chain continues |
 | `thenAccept(fn)` | `CompletableFuture<Void>` | Consume the result — last step, no further chaining |
+| `exceptionally(fn)` | `CompletableFuture<T>` | Catch any error raised earlier in the chain |
 
 ---
 
-### `exceptionally()` — Handling Errors
+### 🧑‍💻 Activity **(5 minutes)**
 
-When an exception is thrown inside any stage of a chain, it propagates down and **skips** all the `thenApply` and `thenAccept` stages until it reaches an `exceptionally()` handler. This gives you one central place to handle errors instead of wrapping every stage in try/catch.
+See what happens when a stage in the chain fails.
 
-```java
-CompletableFuture<Void> future2 = CompletableFuture.supplyAsync(() -> {
-    return calculateBigNumberError();           // throws RuntimeException
-})
-.thenApply(result -> "Result: " + result)       // skipped due to exception
-.thenAccept(System.out::println)                // skipped due to exception
-.exceptionally(ex -> {
-    System.out.println("Caught: " + ex.getMessage());
-    return null;
-});
+1. In the chain you just wrote, change the supplier to call `calculateBigNumberError()` instead of `calculateBigNumber()`.
+2. Run it again.
 
-future2.join();
-```
+You will see the error message printed instead of the result. Notice what happened: the exception **skipped** both `thenApply()` and `thenAccept()` entirely and went straight to `exceptionally()`. That is the whole point — one place to handle errors, instead of a try/catch around every stage.
 
----
-
-### 🧑‍💻 Practice After Class **(take-home)**
-
-Build a single `CompletableFuture` pipeline that takes a price, adds tax, formats it, and prints it — with error handling at the end. This is the pattern you will use most often in real projects.
-
-1. Start with `CompletableFuture.supplyAsync()` that returns a `Long` price — use `1000L`.
-2. Chain a `thenApply()` that adds 10% tax: `price -> price + (price / 10)` (gives `1100`).
-3. Chain a second `thenApply()` that formats the result as a `String`: `withTax -> "Final price: " + withTax`.
-4. Chain a `thenAccept()` that prints the final string.
-5. Chain an `exceptionally()` at the end that catches any error and prints a message.
-6. Call `.join()` on the whole chain so the program waits for it to finish.
-
-To see `exceptionally()` actually fire, test the error path by throwing an exception inside the supplier instead of returning `1000L`.
+> **Note:** The message will read `java.util.concurrent.CompletionException: java.lang.RuntimeException: Something went wrong`. `CompletableFuture` wraps the original exception, so the text is longer than what was thrown. Nothing is broken.
 
 ---
 
