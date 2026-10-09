@@ -221,13 +221,6 @@ You use it exactly like a normal `HashMap` (`put`, `get`, and so on) — the onl
 
 ---
 
-### Other Concurrent Collections
-
-`ConcurrentHashMap` is the one you will use most, but every common collection has a thread-safe version in the same `java.util.concurrent` package. `CopyOnWriteArrayList` is a thread-safe list, best when you read often and write rarely. `CopyOnWriteArraySet` and `ConcurrentHashMap.newKeySet()` are thread-safe sets. `ConcurrentLinkedQueue` and `LinkedBlockingQueue` are thread-safe queues — a blocking queue is what sits inside every `ExecutorService`, holding tasks that are waiting for a free thread. `ConcurrentSkipListMap` is the thread-safe version of `TreeMap` when you need keys kept in sorted order. You do not need to memorise these; the rule is what matters — if a collection is shared across threads, use the concurrent version instead of the plain one.
-
-> **Important:** Making a collection thread-safe protects the collection itself — adding, removing, reading. It does not protect the objects inside it. If two threads take the same `Customer` out of a thread-safe list and both change its balance, that is still a race condition.
----
-
 ### 🧑‍💻 Activity **(10 minutes)**
 
 You will build a shared counter that several threads increment at the same time, and see why synchronization matters.
@@ -321,17 +314,13 @@ Create a `LearnCompletableFuture.java` and add these helper methods:
 
 ```java
 // Method that returns a value
-public static long calculateBigNumber() {
-    long result = 0;
-    for (long i = 0; i < 1_000_000_000; i++) result += i;
-    return result;
+public static long getPrice() {
+    return 1000L;
 }
 
 // Method that throws an exception
-public static long calculateBigNumberError() {
-    long result = 0;
-    for (long i = 0; i < 1_000_000_000; i++) result += i;
-    throw new RuntimeException("Something went wrong");
+public static long getPriceError() {
+    throw new RuntimeException("Price service is down");
 }
 ```
 
@@ -351,7 +340,7 @@ Think of it as a factory line: `thenApply` is a station that changes the product
 
 ```java
 CompletableFuture<Void> future = CompletableFuture.supplyAsync(() -> {
-    return calculateBigNumber();          // produces a Long
+    return getPrice();                    // produces a Long
 })
 .thenApply(result -> {
     return "Result: " + result;           // transforms Long -> String
@@ -385,12 +374,12 @@ future.join(); // waits for the entire chain to finish
 
 See what happens when a stage in the chain fails.
 
-1. In the chain you just wrote, change the supplier to call `calculateBigNumberError()` instead of `calculateBigNumber()`.
+1. In the chain you just wrote, change the supplier to call `getPriceError()` instead of `getPrice()`.
 2. Run it again.
 
 You will see the error message printed instead of the result. Notice what happened: the exception **skipped** both `thenApply()` and `thenAccept()` entirely and went straight to `exceptionally()`. That is the whole point — one place to handle errors, instead of a try/catch around every stage.
 
-> **Note:** The message will read `java.util.concurrent.CompletionException: java.lang.RuntimeException: Something went wrong`. `CompletableFuture` wraps the original exception, so the text is longer than what was thrown. Nothing is broken.
+> **Note:** The message will read `java.util.concurrent.CompletionException: java.lang.RuntimeException: Price service is down`. `CompletableFuture` wraps the original exception, so the text is longer than what was thrown. Nothing is broken.
 
 ---
 
@@ -426,35 +415,7 @@ Here is the crucial difference. A **platform thread keeps its OS thread even whi
 
 Create a `LearnVirtualThreads.java` and code along.
 
-#### Method 1: `Thread.startVirtualThread()`
-
-The simplest way — creates and starts a virtual thread in one call.
-
-```java
-public static void main(String[] args) throws InterruptedException {
-
-    Thread virtualThread = Thread.startVirtualThread(() -> {
-        System.out.println("Running in: " + Thread.currentThread());
-        try {
-            Thread.sleep(1000);
-            System.out.println("Virtual thread woke up!");
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    });
-
-    virtualThread.join();
-    System.out.println("Main thread finished");
-}
-```
-
-Notice the output includes `VirtualThread` — this confirms it is a virtual thread, not a platform thread.
-
-> **Note:** `join()` throws the checked exception `InterruptedException`, so `main` declares `throws InterruptedException`. This is a `join()` rule, not a virtual-thread rule — it applies to platform threads too.
-
-> **Also available:** `Thread.ofVirtual().name("my-thread").start(...)` if you need to give a virtual thread a custom name — virtual threads have no name by default.
-
-#### Method 2: Virtual Thread Executor (recommended for many tasks)
+#### Using a Virtual Thread Executor
 
 For running many tasks concurrently, use `Executors.newVirtualThreadPerTaskExecutor()`. Unlike `newFixedThreadPool`, there is no pool size limit — the executor creates a **new virtual thread for every task you submit** and manages everything automatically.
 
@@ -475,7 +436,9 @@ All 10 tasks run at the same time, so the whole thing finishes in about a second
 
 > **The `try (...)` is essential.** Virtual threads do **not** keep the JVM alive. With a plain `shutdown()`, `main` reaches its end, the JVM exits, and the tasks die before printing anything — you get no output at all. Closing the executor at the end of the try block automatically **waits** for all tasks to finish first.
 
-> **Print `Thread.currentThread()`, not `.getName()`.** Virtual threads have empty names by default, so `getName()` prints a blank. Printing the thread object shows the full `VirtualThread[#21]/...` label.
+> **Print `Thread.currentThread()`, not `.getName()`.** Virtual threads have empty names by default, so `getName()` prints a blank. Printing the thread object shows the full `VirtualThread[#21]/...` label — this is how you confirm you are looking at a virtual thread and not a platform thread.
+
+> **Also available:** `Thread.startVirtualThread(...)` creates and starts a single virtual thread in one call, and `Thread.ofVirtual().name("my-thread").start(...)` lets you give it a custom name.
 
 ---
 
