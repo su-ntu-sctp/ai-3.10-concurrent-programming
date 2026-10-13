@@ -230,6 +230,8 @@ You will build a shared counter that several threads increment at the same time,
 3. Use `join()` to wait for both threads to finish, then print the final count. Run it a few times — you will see a value **less than 20,000** (often around 17,000–18,000) because `count++` is not atomic (a race condition). Notice the number is different on every run.
 4. Now fix it: make `increment()` a `synchronized` method (or protect `count++` with a `ReentrantLock`). Run again — the result should be exactly **20,000** every time, with no variation at all.
 
+> **What `join()` does:** `t1.join()` means *main waits here until t1 has finished*. Without it, main races ahead and prints the count while the threads are still counting — you would see a small number, or even 0. Note that t1 and t2 still run at the same time as each other; main waiting for t1 does not hold t2 up.
+
 > **Note:** `join()` throws the checked exception `InterruptedException`, so your `main` method needs `throws InterruptedException` (or wrap the `join()` calls in a try/catch).
 
 ---
@@ -286,6 +288,8 @@ public class LearnExecutors {
     }
 }
 ```
+
+> **What `Thread.sleep()` is doing here:** `Thread.sleep(1000)` pauses that thread for one second. In this example it is standing in for **real waiting** — a database query, an API call, a file read. That is what a thread spends most of its time doing in a real application, so sleeping is a simple way to simulate it. `sleep()` throws `InterruptedException`, which is why it sits inside a try/catch.
 
 **Watch what happens when the pool shrinks.** Change the pool size from 5 to 2 and run it again:
 
